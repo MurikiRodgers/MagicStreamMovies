@@ -2,18 +2,25 @@ package controllers
 
 import (
 	"context"
+	"errors"
+	"log"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/MurikiRodgers/MagicStreamMovies/Server/MagicStreamMoviesServer/database"
 	"github.com/MurikiRodgers/MagicStreamMovies/Server/MagicStreamMoviesServer/models"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"google.golang.org/genai"
 )
 
 var movieCollection *mongo.Collection = database.OpenCollection("movies")
+var rankingCollection *mongo.Collection = database.OpenCollection("rankings")
 
 var validate = validator.New()
 
@@ -85,4 +92,123 @@ func AddMovie() gin.HandlerFunc {
 		}
 		c.JSON(http.StatusCreated, result)
 	}
+}
+func AdminReviewUpdate() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		movieId := c.Param("imdb_id")
+		if movieId == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Movie Id required"})
+			return
+		}
+		var req struct {
+			AdminReview string `json:"admin_review"`
+		}
+		var resp struct {
+			RankingName string `json:"ranking_name"`
+			AdminReview string `json:"admin_review"`
+		}
+		if err := c.ShouldBind(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+			return
+		}
+		sentiment, rankVal, err := GetReviewRanking(req.AdminReview)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting review ranking"})
+			return
+		}
+
+		filter := bson.M{"imdb_id": movieId}
+
+		update := bson.M{
+			"$set": bson.M{
+				"admin_review": req.AdminReview,
+				"ranking": bson.M{
+					"ranking_name":  sentiment,
+					"ranking_value": rankVal,
+				},
+			},
+		}
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		result, err := movieCollection.UpdateOne(ctx, filter, update)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error updating movie"})
+			return
+		}
+		if result.MatchedCount == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Movie not found"})
+			return
+		}
+		resp.RankingName = sentiment
+		resp.AdminReview = req.AdminReview
+		c.JSON(http.StatusOK, resp)
+	}
+}
+
+func GetReviewRanking(admin_review string) (string, int, error) {
+	rankings, err := GetRankings()
+	if err != nil {
+		return "", 0, err
+	}
+	sentimentDelimited := ""
+	for _, ranking := range rankings {
+		if ranking.RankingValue != 999 {
+			sentimentDelimited = sentimentDelimited + ranking.RankingName + ","
+		}
+	}
+	sentimentDelimited = strings.Trim(sentimentDelimited, ",")
+	err = godotenv.Load(".env")
+	if err != nil {
+		log.Println("Warning: .env file not found")
+	}
+	GeminiApiKey := os.Getenv("GEMINI_AI_API_KEY")
+	if GeminiApiKey == "" {
+		return "", 0, errors.New("could not read GEMINI_AI_API_KEY")
+
+	}
+	ctx := context.Background()
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  GeminiApiKey,
+		Backend: genai.BackendGeminiAPI,
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	base_prompt_template := os.Getenv("BASE_PROMPT_TEMPLATE")
+	base_prompt := strings.Replace(base_prompt_template, "{rankings}", sentimentDelimited, 1)
+	contents := []*genai.Content{
+		genai.NewContentFromText(base_prompt+admin_review, genai.RoleUser),
+	}
+	response, err := client.Models.GenerateContent(ctx, "gemini-2.0-flash", contents, nil)
+	if err != nil {
+		return "", 0, err
+	}
+	respText := response.Candidates[0].Content.Parts[0].Text
+
+	rankVal := 0
+	for _, ranking := range rankings {
+		if ranking.RankingName == respText {
+			rankVal = ranking.RankingValue
+			break
+		}
+	}
+	return respText, rankVal, nil
+
+}
+
+func GetRankings() ([]models.Ranking, error) {
+	var rankings []models.Ranking
+	var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	cursor, err := rankingCollection.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	if err := cursor.All(ctx, &rankings); err != nil {
+		return nil, err
+	}
+	return rankings, nil
 }
