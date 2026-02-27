@@ -106,11 +106,21 @@ func ValidateToken(tokenString string) (*SignedDetails, error) {
 	if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 		return nil, err
 	}
-	if claims.ExpiresAt.Time.Before(time.Now()){
+	if claims.ExpiresAt.Time.Before(time.Now()) {
 		return nil, errors.New("Token is expired")
 	}
 
 	return claims, nil
 
-
+}
+func GetUserIdFromContext(c *gin.Context) (string, error) {
+	userId, exists := c.Get("userId")
+	if !exists {
+		return "", errors.New("User ID not found in context")
+	}
+	id, okay := userId.(string)
+	if !okay {
+		return "", errors.New("Unable to reteieve userId")
+	}
+	return id, nil
 }
