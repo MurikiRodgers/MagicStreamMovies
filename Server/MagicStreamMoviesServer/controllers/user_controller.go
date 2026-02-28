@@ -15,8 +15,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-var userCollection *mongo.Collection = database.OpenCollection("users")
-
 func HashPassword(password string) (string, error) {
 	HashPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -25,7 +23,7 @@ func HashPassword(password string) (string, error) {
 	return string(HashPassword), nil
 }
 
-func RegisterUser() gin.HandlerFunc {
+func RegisterUser(client *mongo.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var user models.User
 
@@ -46,9 +44,9 @@ func RegisterUser() gin.HandlerFunc {
 			return
 		}
 
-		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		var ctx, cancel = context.WithTimeout(c, 100*time.Second)
 		defer cancel()
-
+		var userCollection *mongo.Collection = database.OpenCollection("users", client)
 		count, err := userCollection.CountDocuments(ctx, bson.M{"email": user.Email})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check existing user"})
@@ -73,7 +71,7 @@ func RegisterUser() gin.HandlerFunc {
 	}
 }
 
-func LoginUser() gin.HandlerFunc {
+func LoginUser(client *mongo.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var userLogin models.UserLogin
 
@@ -81,10 +79,11 @@ func LoginUser() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input data"})
 			return
 		}
-		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		var ctx, cancel = context.WithTimeout(c, 100*time.Second)
 		defer cancel()
 
 		var foundUser models.User
+		var userCollection *mongo.Collection = database.OpenCollection("users", client)
 
 		err := userCollection.FindOne(ctx, bson.M{"email": userLogin.Email}).Decode(&foundUser)
 		if err != nil {
@@ -102,7 +101,7 @@ func LoginUser() gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate tokens"})
 			return
 		}
-		err = utils.UpdateAllTokens(foundUser.UserID, token, refreshToken)
+		err = utils.UpdateAllTokens(foundUser.UserID, token, refreshToken, client)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update tokens"})
 			return

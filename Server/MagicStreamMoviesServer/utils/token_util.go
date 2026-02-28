@@ -24,7 +24,6 @@ type SignedDetails struct {
 
 var SECRET_KEY string = os.Getenv("SECRET_KEY")
 var SECRET_REFRESH_KEY string = os.Getenv("SECRET_REFRESH_KEY")
-var userCollection *mongo.Collection = database.OpenCollection("users")
 
 func GenerateAllTokens(email, firstName, lastName, role, userId string) (string, string, error) {
 	claims := &SignedDetails{
@@ -64,7 +63,7 @@ func GenerateAllTokens(email, firstName, lastName, role, userId string) (string,
 
 }
 
-func UpdateAllTokens(userId, token, refreshToken string) (err error) {
+func UpdateAllTokens(userId, token, refreshToken string, client *mongo.Client) (err error) {
 	var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 
@@ -77,6 +76,7 @@ func UpdateAllTokens(userId, token, refreshToken string) (err error) {
 			"updated_at":    updateAt,
 		},
 	}
+	var userCollection *mongo.Collection = database.OpenCollection("users", client)
 	_, err = userCollection.UpdateOne(ctx, bson.M{"user_Id": userId}, upadateData)
 	if err != nil {
 		return err
@@ -121,6 +121,17 @@ func GetUserIdFromContext(c *gin.Context) (string, error) {
 	id, okay := userId.(string)
 	if !okay {
 		return "", errors.New("Unable to reteieve userId")
+	}
+	return id, nil
+}
+func GetRoleFromContext(c *gin.Context) (string, error) {
+	role, exists := c.Get("role")
+	if !exists {
+		return "", errors.New("Role not found in context")
+	}
+	id, okay := role.(string)
+	if !okay {
+		return "", errors.New("Unable to retrieve role")
 	}
 	return id, nil
 }
