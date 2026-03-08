@@ -3,7 +3,7 @@ import axiosClient from '../../api/axiosConfig';
 import Movies from '../movies/Movies';
 import axios from 'axios';
 
-const Home= () =>{
+const Home= ({updateMovieReview}) =>{
     const [movies, setMovies] = useState([]);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState("")
@@ -31,7 +31,7 @@ if (response.data.length === 0){
     return(
         <>
         {loading ? (<h2>Loading....</h2>):(
-            <Movies movies={movies} message={message}/>
+            <Movies movies={movies}  message={message} updateMovieReview={updateMovieReview}/>
         )}
         </>
     )

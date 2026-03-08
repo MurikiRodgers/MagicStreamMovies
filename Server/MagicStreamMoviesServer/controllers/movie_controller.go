@@ -244,7 +244,7 @@ func GetRecommendedMovies(client *mongo.Client) gin.HandlerFunc {
 		findOptions := options.Find()
 		findOptions.SetSort(bson.D{{Key: "ranking.ranking_value", Value: 1}})
 		findOptions.SetLimit(recommendedMovieLimitVal)
-		filter := bson.M{"genre.genre_name": bson.M{"$in": favourite_genres}}
+		filter := bson.D{{Key: "genre.genre_name", Value: bson.D{{Key: "$in", Value: favourite_genres}}}}
 
 		var ctx, cancel = context.WithTimeout(c, 100*time.Second)
 		defer cancel()
@@ -255,13 +255,13 @@ func GetRecommendedMovies(client *mongo.Client) gin.HandlerFunc {
 			return
 		}
 		defer cursor.Close(ctx)
-		var reccommendedMovies []models.Movie
-		if err := cursor.All(ctx, &reccommendedMovies); err != nil {
+		var recommendedMovies []models.Movie
+		if err := cursor.All(ctx, &recommendedMovies); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding recommended movies"})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"recommended_movies": reccommendedMovies})
+		c.JSON(http.StatusOK, recommendedMovies)
 
 	}
 }
@@ -270,7 +270,7 @@ func GetUsersFavouriteGenres(userId string, client *mongo.Client, c *gin.Context
 	var ctx, cancel = context.WithTimeout(c, 100*time.Second)
 	defer cancel()
 
-	filter := bson.M{"user_id": userId}
+	filter := bson.D{{Key: "user_id", Value: userId}}
 	projection := bson.M{
 		"favourite_genres.genre_name": 1,
 		"_id":                         0,
@@ -301,4 +301,25 @@ func GetUsersFavouriteGenres(userId string, client *mongo.Client, c *gin.Context
 		}
 	}
 	return genreNames, nil
+}
+func GetGenres(client *mongo.Client) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var ctx, cancel = context.WithTimeout(c.Request.Context(), 100*time.Second)
+		defer cancel()
+		var genres []models.Genre
+		var genreCollection *mongo.Collection = database.OpenCollection("genres", client)
+
+		cursor, err := genreCollection.Find(ctx, bson.M{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching movie genres"})
+			return
+		}
+		defer cursor.Close(ctx)
+		if err := cursor.All(ctx, &genres); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, genres)
+
+	}
 }
