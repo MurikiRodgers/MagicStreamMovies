@@ -111,7 +111,6 @@ func LoginUser(client *mongo.Client) gin.HandlerFunc {
 			Name:     "access_token",
 			Value:    token,
 			Path:     "/",
-			Domain:   "localhost",
 			MaxAge:   86400, //
 			Secure:   true,
 			HttpOnly: true,
